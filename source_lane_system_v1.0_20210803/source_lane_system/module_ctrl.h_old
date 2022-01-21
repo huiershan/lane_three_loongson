@@ -1,0 +1,38 @@
+/*-----------------------------------------------------*/
+/*
+* Filename    : module_ctrl.h
+* Author      : neal.deng
+* Version     : 1.0.0
+* Date        : 2014-07-31
+* Description : can module control function
+* others      :
+* FunctionList:
+* History     :
+*   1. Date:
+*      Author:
+*      Modification:
+*/
+/*-----------------------------------------------------*/
+
+#ifndef _MODULE_CTRL_H
+#define _MODULE_CTRL_H
+
+
+int can_msg_init(void);
+//can module selfcheck
+int module_selfcheck(int mod_addr);
+
+//read IO module type
+int get_type(int mod_addr);
+//read IO module input port
+int get_io(int mod_addr,int num);
+
+//set IO module out port stat
+int set_io(int mod_addr,int num,int stat);
+
+
+//get adc module volt
+float get_ad(int mod_addr,int num);
+#endif
+/*--------------------end file------------------------*/
+

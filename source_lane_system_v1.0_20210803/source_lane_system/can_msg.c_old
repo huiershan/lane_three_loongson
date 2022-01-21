@@ -1,0 +1,591 @@
+/*-----------------------------------------------------*/
+/*
+* Filename    : can_msg.c
+* Author      : neal.deng
+* Version     : 1.0.1
+* Date        : 2014-06-27
+* Description : can  Restart inital read  write function
+* others      :
+* FunctionList:
+* History     :
+*   1. Date:	2014-07-10
+*      Author:	Neal.deng
+*      Modification: can read operation function
+*/
+/*-----------------------------------------------------*/
+
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <unistd.h>
+#include <semaphore.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/time.h>
+#include <sys/wait.h>
+#include "global.h"
+#include "debug.h"
+#include "can_msg.h"
+#include "sysutil_d.h"
+/*--------------------------------*/
+#define  CAN_NAME 	"can0"
+
+//candump fd 
+static int _gcandump_fd = -1;
+//candump FILE handle 
+static FILE *_gcandump_fs = NULL;
+//sem
+static sem_t can_msg_sem;
+
+/*---------------------------------------------*/
+
+//处理重candump管道接收到的字符数据，转化为can msg数据
+static int CAN_MsgDataDeal(CAN_Msg_t *msg, char *data);
+//读取消息，并处理成CAN msg
+//addr 要读取节点的地址
+static int can_read_msg(CAN_Msg_t *msg,int addr);
+//CAN Msg read
+static int CAN_MsgRead(CAN_Msg_t *msg);
+//CAN Msg write
+static int CAN_MsgWrite(CAN_Msg_t msg);
+
+static void CAN_MsgToFrame(uint8_t *frame,CAN_Msg_t msg);
+//frame to can msg
+static int CAN_FrameToMsg(CAN_Msg_t *msg,uint8_t* frame);
+/*---------------------------------------------*/
+
+
+//打包数据包
+int can_pack_msg(can_msg_Typedef *p,...)
+{
+	va_list ap;
+	int ret = -1;
+	int port;
+	int status;
+
+	va_start(ap,p);
+	memset(p->data,0,4);
+
+	if(CMD_TYPE_CHECK == p->type)
+	{
+		switch(p->cmd)
+		{
+		case CMD_CHECK_ID:
+			{
+				ret = 0;
+				break;
+			}
+		case CMD_SELF_CHECK_ID:
+			{
+				
+				ret = 0;
+				break;
+			}
+		default:
+			{
+				print_error("CAN type check No this cmd id %d\n",p->cmd);
+				ret = -1;
+				break;
+			}
+		}
+	}
+	else if(CMD_TYPE_CTRL == p->type)
+	{
+		switch(p->cmd)
+		{
+		case CMD_DI_ID:
+			{
+				port = va_arg(ap,int);
+				p->data[0] = port&0xff;
+				ret = 0;
+				break;
+			}
+		case CMD_DO_ID:
+			{
+				port = va_arg(ap,int);
+				status = va_arg(ap,int);
+				p->data[0] = port&0xff;
+				p->data[1] = status?0xff:0;
+				ret = 0;
+				break;
+			}
+		case CMD_AD_ID:
+			{
+				port = va_arg(ap,int);
+				p->data[0] = port&0xff;
+				ret = 0;
+				break;
+			}
+		default:
+			{
+				print_error("CAN type ctrl No this cmd id %d\n",p->cmd);
+				ret = -1;
+				break;
+			}
+		
+		}
+	
+	}
+	else
+	{
+		print_error("CAN type No this type id %d\n",p->type);
+		ret = -1;
+	}
+
+	va_end(ap);
+
+	return ret;
+}
+
+
+//解数据包
+int can_msg_parse(can_msg_Typedef *msg,...)
+{
+	va_list ap;
+	int ret = -1;
+
+	int *type_p;
+	int *port_p;
+	int *status_p;
+	float *f_v_p;
+	char f_buf[12];
+	uint32_t rel;
+
+	va_start(ap, msg);
+
+	if(CMD_TYPE_CHECK == msg->type)
+	{
+		switch(msg->cmd)
+		{
+		case CMD_CHECK_ACK_ID:
+			{
+				type_p = va_arg(ap,int*);
+				*type_p = msg->data[0];
+				ret = 0;
+				break;
+			}
+		case CMD_SELF_CHECK_ACK_ID:
+			{
+				type_p = va_arg(ap, int*);
+				*type_p = msg->data[0];
+				ret = 0;
+				break;
+			}
+		default:
+			{		
+				print_error("No this type check cmd %d\n",msg->cmd);
+				#ifdef CAN_CTRL_DEBUG
+				CAN_MsgPrint(*msg);	
+				#endif
+				ret = -1;
+				break;
+			}
+		
+		}
+	}
+	else if(CMD_TYPE_CTRL == msg->type)
+	{
+		switch(msg->cmd)
+		{
+		case CMD_DI_ACK_ID:
+			{
+				port_p = va_arg(ap,int*);
+				status_p = va_arg(ap,int*);
+				
+				*port_p = msg->data[0];
+				*status_p = msg->data[1]?1:0;
+				ret = 0;
+				break;
+			}
+		case CMD_DO_ACK_ID:
+			{
+				ret = 0;
+				break;
+			}
+		case CMD_AD_ACK_ID:
+			{
+				port_p = va_arg(ap,int*);
+				f_v_p = va_arg(ap,float*);
+    
+				*port_p = msg->data[0];
+				if (msg->data[1] > 127)
+				{
+					rel = 0xffffff00 | msg->data[1];
+				}
+				else 
+				{
+					rel = msg->data[1];
+				}
+				sprintf(f_buf,"%d.%04d",rel,(msg->data[2]<<8) | msg->data[3]);
+				*f_v_p = atof(f_buf);
+				ret = 0;
+				break;
+			}
+		default:
+			{		
+				print_error("No this type ctrl cmd %d\n",msg->cmd);
+				#ifdef CAN_CTRL_DEBUG
+				CAN_MsgPrint(*msg);	
+				#endif
+				ret = -1;
+				break;
+			}
+		}
+	}
+	else
+	{
+		print_error("CAN type No this type id %d\n",msg->type);
+		#ifdef CAN_CTRL_DEBUG
+		CAN_MsgPrint(*msg);	
+		#endif
+		ret = -1;
+	}
+
+	va_end(ap);
+	return ret;
+
+}
+
+
+//处理重candump管道接收到的字符数据，转化为can msg数据
+static int CAN_MsgDataDeal(CAN_Msg_t *msg, char *data)
+{
+	int count;
+	char *p;
+	char *prel;
+	uint8_t buf[8];
+
+	p = data;
+	prel = NULL;
+	if(p[0] != '<')
+	{
+		return -1;
+	}
+
+	count = 0;
+	prel = strtok(p," ");
+	while(prel != NULL)
+	{
+		count++;
+		if(count > 2)
+		{
+			if(count < 11)
+			{
+				CAN_debug_print("CAN deal data %d = %s\n",count-3,prel);
+				buf[count-3] = strtoul(prel,NULL,16);
+			}
+		}
+		prel = strtok(NULL, " ");
+	}
+	
+	if(buf[0] != 0)
+	{
+		return -1;
+	}
+
+	CAN_FrameToMsg(msg,buf);
+	return 0;
+}
+
+
+//读取消息，并处理成CAN msg
+//addr 要读取节点的地址
+static int can_read_msg(CAN_Msg_t *msg,int addr)
+{
+	int ret;
+	int count=2;
+
+	do{
+		//CAN Msg read
+		usleep(10);
+		ret = CAN_MsgRead(msg);
+		if(ret == 0)
+		{
+			if(msg->src != addr)
+			{
+				continue;
+			}
+		}
+		count--;
+
+	}while((ret != 0)&&(count > 0));
+
+	if((count <= 0)||(ret < 0))
+	{
+		return -1;
+	}
+	return 0;
+}
+
+
+//can write and red msg
+int can_write_and_read_msg(CAN_Msg_t *p)
+{
+	CAN_Msg_t msg;
+	int ret;
+
+
+	sem_wait(&can_msg_sem);
+	msg = *p;
+	CAN_MsgWrite(msg);
+	memset((char*)p,0,sizeof(CAN_Msg_t));
+	usleep(10*1000);
+	ret = can_read_msg(p,msg.dst);
+
+	sem_post(&can_msg_sem);
+
+	return ret;
+}
+
+
+/*---------------------------------------------*/
+
+//can msg to frame
+static void CAN_MsgToFrame(uint8_t *frame,CAN_Msg_t msg)
+{	
+
+	frame[0] = msg.dst;
+	frame[1] = msg.src;
+	frame[2] = msg.type;
+	frame[3] = msg.cmd;
+	frame[4] = msg.data[0];
+	frame[5] = msg.data[1];
+	frame[6] = msg.data[2];
+	frame[7] = msg.data[3];
+
+}
+
+//frame to can msg
+static int CAN_FrameToMsg(CAN_Msg_t *msg,uint8_t* frame)
+{
+	int i;
+	msg->dst = frame[0];
+	msg->src = frame[1];
+	msg->type = frame[2];
+	msg->cmd = frame[3];
+	for(i=0; i<4; ++i)
+	{
+		msg->data[i] = frame[4+i];
+	}
+	return 0;
+}
+
+
+//CAN Msg read
+static int CAN_MsgRead(CAN_Msg_t *msg)
+{
+	int fd,ret;
+	int flags;
+	fd_set rset,errset,allset;
+	char data[512]={'\0'};
+	struct timeval timeout ={3,0};
+	int count;
+
+	fd = _gcandump_fd;
+
+	FD_ZERO(&allset);
+	FD_SET(fd,&allset);
+
+	count = 3;
+	while(1)
+	{
+		rset = allset;
+		errset = allset;
+    
+		timeout.tv_sec = 2;
+		timeout.tv_usec = 0;
+
+		ret = select(fd+1,&rset,NULL,&errset,&timeout);
+		if(ret < 0)
+		{
+			printf("%s :not ready\n",CAN_NAME);
+			return -2;
+		
+		}
+		else if(ret == 0)
+		{
+			printf("%s :read time out\n",CAN_NAME);
+			return -1;
+		}
+		else
+		{
+			//判断所否有读事件发生
+			if(FD_ISSET(fd,&rset))
+			{
+				while(1)
+				{
+					CAN_debug_print("can reading\n");
+					memset(data,'\0',sizeof(data));
+
+					if(fgets(data,sizeof(data)-1,_gcandump_fs) == NULL)
+					{
+						flags = fcntl(_gcandump_fd,F_GETFL,0);
+						fcntl(_gcandump_fd,F_SETFL,flags&(~O_NONBLOCK));
+						break;
+					}
+        
+					CAN_debug_print("can reading ok\n");
+					memset(msg,0,sizeof(CAN_Msg_t));
+					if(CAN_MsgDataDeal(msg, data) < 0)
+					{
+						memset(msg,0,sizeof(CAN_Msg_t));
+						count--;
+						if(count <= 0)
+						{
+							print_error("can read fail\n");
+							return -8;
+						}
+						
+						flags = fcntl(_gcandump_fd,F_GETFL,0);
+						fcntl(_gcandump_fd,F_SETFL,flags|O_NONBLOCK);
+						continue;
+					}
+
+					if(count > 2)
+					{
+						count = 3;
+						break;
+					}
+
+					return 0;
+				}
+			}
+			
+			if(FD_ISSET(fd,&errset))
+			{
+				printf("candump slecct errset fail\n");
+				return -5;
+			}
+		
+		}
+	}
+}
+
+//CAN Msg write
+static int CAN_MsgWrite(CAN_Msg_t msg)
+{
+	pid_t pid,pid_wait;
+
+	pid = fork();
+	if(pid < 0)
+	{
+		return -1;
+	}
+	else if(0 == pid)
+	{
+		//child
+		uint8_t data[8];
+		char data_str[8][64];
+		int fd,ret,i;
+
+		CAN_MsgToFrame(data,msg);
+
+		fd = open("/dev/null",O_WRONLY);
+		close(1);
+		ret = dup(fd);
+		if(ret > 0)
+		{
+			printf("dup fail\n");
+		}
+
+		for(i=0; i<8; ++i)
+		{
+			sprintf(data_str[i],"%d",data[i]);
+		}
+
+		ret = execlp("cansend","cansend",CAN_NAME,"-i","0",data_str[0],data_str[1],data_str[2],data_str[3],\
+			data_str[4],data_str[5],data_str[6],data_str[7],NULL);
+
+		if(ret < 0)
+		{
+			printf("cansend execlp fail\n");
+			return -1;
+		}
+	
+	}
+	else
+	{
+		int stat_val;
+		CAN_debug_print("cansend wait child exit\n");
+		do{
+			pid_wait = wait(&stat_val);
+
+		}while(pid != pid_wait);
+	
+		if(WIFEXITED(stat_val))
+		{
+			return WEXITSTATUS(stat_val);
+		}
+		else
+		{
+			print_error("cansend wait fail\n");
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+//printf can msg data
+int CAN_MsgPrint(CAN_Msg_t msg)
+{
+	int i;
+	printf("CAN MSG: \n");
+	printf("\tdst=%d\n",msg.dst);
+	printf("\tsrc=%d\n",msg.src);
+	printf("\ttype=%d\n",msg.type);
+	printf("\tcmd=%d\n",msg.cmd);
+
+	for(i=0; i<4; ++i)
+	{
+		printf("\tdata[%d]=%d\n",i,msg.data[i]);
+	}
+
+	return 0;
+}
+
+
+
+//can init
+//int CAN_Inital(void)
+int can_msg_init(void)
+{
+	int ret;
+	_gcandump_fs = popen("candump "CAN_NAME,"r");
+	if(_gcandump_fs == NULL)
+	{
+		return -1;
+	}
+
+	_gcandump_fd = fileno(_gcandump_fs);
+	usleep(100*1000);
+#if 0
+	printf("wait candump running\n");
+	memset(buf,'\0',sizeof(buf));
+	while(fgets(buf,sizeof(buf),_gcandump_fs) == NULL)
+	{
+		printf("wait candump running\n");
+		usleep(5*1000);
+	}
+
+	CAN_debug_print("CAN candump open : %s\n",CAN_NAME);
+#endif
+//	memset(buf,'\0',sizeof(buf));
+	//CAN Msg read
+//	ret = CAN_MsgRead(buf,sizeof(buf));
+	ret = sem_init(&can_msg_sem,0,1);
+	if(ret != 0)
+	{
+		print_error("CAN intal ret fail: %d\n",ret);
+		return -1;
+	}
+
+	return 0;
+}
+
+/*-----------------------------------------------------*/
+
+

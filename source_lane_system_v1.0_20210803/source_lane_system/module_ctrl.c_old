@@ -1,0 +1,223 @@
+/*-----------------------------------------------------*/
+/*
+* Filename    : module_ctrl.h
+* Author      : neal.deng
+* Version     : 1.0.0
+* Date        : 2014-07-31
+* Description : can module control function
+* others      :
+* FunctionList:
+* History     :
+*   1. Date:
+*      Author:
+*      Modification:
+*/
+/*-----------------------------------------------------*/
+
+
+#include "module_ctrl.h"
+#include "can_msg.h"
+#include "debug.h"
+#include "global.h"
+
+//#define MODULE_DEBUG_EN
+#if defined MODULE_DEBUG_EN
+#define MODULE_DEBUG_CNT	10
+#include "time.h"
+#include "sys/time.h"
+#include "sysutil_d.h"
+#endif
+//get type
+int get_type(int mod_addr)
+{
+	int type;
+	can_msg_Typedef x;
+
+#if defined MODULE_DEBUG_EN
+	struct timeval start,end;
+	static int i=0;
+	if(i<MODULE_DEBUG_CNT)
+	{
+		gettimeofday(&start,NULL);
+	}
+#endif
+	x.dst = mod_addr;
+	x.src = 0 ;
+	x.type =  CMD_TYPE_CHECK;
+	x.cmd = CMD_CHECK_ID;
+
+	can_pack_msg(&x,0);
+	can_write_and_read_msg(&x);
+	if(can_msg_parse(&x,&type) == -1)
+	{
+		print_error("get type fail\n");
+		return -1;
+	}
+
+#if defined MODULE_DEBUG_EN
+	if(i<MODULE_DEBUG_CNT)
+	{
+		gettimeofday(&end,NULL);
+		printf("type time: %ld ms\n",tim_subtrack(NULL,start,end));
+		i++;
+	}
+#endif
+	return type;
+}
+
+
+//module selfcheck
+int module_selfcheck(int mod_addr)
+{
+	int ret;
+	can_msg_Typedef x;
+
+#if defined MODULE_DEBUG_EN
+	struct timeval start,end;
+	static int i=0;
+	if(i<MODULE_DEBUG_CNT)
+	{
+		gettimeofday(&start,NULL);
+	}
+#endif
+	x.dst = mod_addr;
+	x.src = 0 ;
+	x.type =  CMD_TYPE_CHECK;
+	x.cmd = CMD_SELF_CHECK_ID;
+
+	can_pack_msg(&x,0);
+	can_write_and_read_msg(&x);
+	if(can_msg_parse(&x,&ret) == -1)
+	{
+		print_error("can selfcheck fail\n");
+		return -1;
+	}
+
+#if defined MODULE_DEBUG_EN
+	if(i<MODULE_DEBUG_CNT)
+	{
+		gettimeofday(&end,NULL);
+		printf("selfcheck time: %ld ms\n",tim_subtrack(NULL,start,end));
+		i++;
+	}
+#endif
+	return 0;
+}
+
+//read IO module input port
+int get_io(int mod_addr,int num)
+{
+	int stat;
+	can_msg_Typedef x;
+#if defined MODULE_DEBUG_EN
+	struct timeval start,end;
+	static int i=0;
+	if(i<MODULE_DEBUG_CNT)
+	{
+		gettimeofday(&start,NULL);
+	}
+#endif
+	x.dst = mod_addr;
+	x.src = 0 ;
+	//x.cmd_type =  CMD_TYPE_CTRL;
+	x.type =  CMD_TYPE_CTRL;
+	x.cmd = CMD_DI_ID;
+
+	can_pack_msg(&x,num);
+	can_write_and_read_msg(&x);
+	if(can_msg_parse(&x,&num,&stat) == -1)
+	{
+		print_error("can get io fail\n");
+		return -1;
+	}
+#if defined MODULE_DEBUG_EN
+	if(i<MODULE_DEBUG_CNT)
+	{
+		gettimeofday(&end,NULL);
+		printf("get io time: %ld ms\n",tim_subtrack(NULL,start,end));
+		i++;
+	}
+#endif
+	return stat;
+}
+
+
+//set IO module out port stat
+int set_io(int mod_addr,int num,int stat)
+{
+	can_msg_Typedef x;
+
+#if defined MODULE_DEBUG_EN
+	struct timeval start,end;
+	static int i=0;
+	if(i<MODULE_DEBUG_CNT)
+	{	
+		gettimeofday(&start,NULL);
+	}
+#endif
+	x.dst = mod_addr;
+	x.src = 0 ;
+	//x.cmd_type =  CMD_TYPE_CTRL;
+	x.type =  CMD_TYPE_CTRL;
+	x.cmd = CMD_DO_ID;
+
+	can_pack_msg(&x,num,stat);
+	can_write_and_read_msg(&x);
+	if(can_msg_parse(&x,&num,&stat) == -1)
+	{
+		print_error("can wio fail\n");
+		return -1;
+	}
+
+#if defined MODULE_DEBUG_EN
+	if(i<MODULE_DEBUG_CNT)
+	{
+		gettimeofday(&end,NULL);
+		printf("set io time: %ld ms\n",tim_subtrack(NULL,start,end));
+		i++;
+	}
+#endif
+	return 0;
+}
+
+//get adc module volt
+float get_ad(int mod_addr,int num)
+{
+	float v;
+	can_msg_Typedef x;
+
+#if defined MODULE_DEBUG_EN
+	struct timeval start,end;
+	static int i=0;
+	if(i<MODULE_DEBUG_CNT)
+	{
+		gettimeofday(&start,NULL);
+	}
+#endif
+	x.dst = mod_addr;
+	x.src = 0 ;
+	x.type =  CMD_TYPE_CTRL;
+	x.cmd = CMD_AD_ID;
+	
+	can_pack_msg(&x,num);
+	can_write_and_read_msg(&x);
+	if(can_msg_parse(&x,&num,&v) == -1)
+	{
+		printf("get ad %d:%d fail.\n",mod_addr,num);
+		return -255.0;
+	}
+
+#if defined MODULE_DEBUG_EN
+	if(i<MODULE_DEBUG_CNT)
+	{
+		gettimeofday(&end,NULL);
+		printf("get adc time: %ld ms\n",tim_subtrack(NULL,start,end));
+		i++;
+	}
+#endif
+	return v;
+}
+
+
+/*--------------------end file------------------------*/
+

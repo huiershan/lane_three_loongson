@@ -1,0 +1,88 @@
+/*-----------------------------------------------------*/
+/*
+* Filename    : can_msg.h
+* Author      : neal.deng
+* Version     : 1.0.1
+* Date        : 2014-06-27
+* Description : can  Restart inital read  write function
+* others      :
+* FunctionList:
+* History     :
+*   1. Date:
+*      Author:
+*      Modification:
+*/
+/*-----------------------------------------------------*/
+
+
+#ifndef _CAN_MSG_H
+#define _CAN_MSG_H
+#include <stdio.h>
+#include <stdint.h>
+
+//#define CAN_CTRL_DEBUG
+#ifdef CAN_CTRL_DEBUG
+	#define CAN_debug_print(fmt,args...)	printf(fmt,##args)
+#else
+	#define CAN_debug_print(fmt,args...)	do{}while(0)
+#endif
+
+
+
+#define CMD_TYPE_CHECK     0
+#define CMD_CHECK_ID	   1
+#define CMD_CHECK_ACK_ID   2
+#define CMD_SELF_CHECK_ID	    3
+#define CMD_SELF_CHECK_ACK_ID   4
+
+/*-----------------*/
+
+#define CMD_TYPE_CTRL      1
+
+#define CMD_DI_ID		   1
+#define CMD_DI_ACK_ID	   2
+#define CMD_DO_ID		   3
+#define CMD_DO_ACK_ID	   4
+#define CMD_AD_ID		   5
+#define CMD_AD_ACK_ID	   6
+
+//CAN Bus type
+typedef enum{
+	CAN0 = 0,   //CAN0 bus
+	CAN1,		//CAN1 bus
+}CAN_Bus_t;
+
+//CAN msg type
+typedef struct
+{
+	uint8_t dst;
+	uint8_t src;
+	uint8_t type;
+	uint8_t cmd;
+	uint8_t data[4];
+}CAN_Msg_t;
+
+typedef CAN_Msg_t can_msg_Typedef; 
+
+//can init
+//int CAN_Inital(void);
+int can_msg_init(void);
+
+//打包数据包
+int can_pack_msg(CAN_Msg_t *p,...);
+//解数据包
+int can_msg_parse(CAN_Msg_t *msg,...);
+//can write and red msg
+int can_write_and_read_msg(CAN_Msg_t *p);
+
+
+//CAN bus restart
+int CAN_Stop(void);
+
+
+//printf can msg data
+int CAN_MsgPrint(CAN_Msg_t msg);
+
+#endif
+/*--------------------------end file---------------------------*/
+
